@@ -16,23 +16,6 @@
 #define BACKLOG 10   //pending connections on queue
 
 
-/*
-struct addrinfo{
-    int ai_flags;
-    int ai_family;
-    int ai_socktype;
-    int ai_protocol;
-    size_t ai_addrlen;
-    struct sockaddr *ai_addr;
-    char *ai_canonname;
-    struct addrinfo *ai_next;
-
-};*/
-
-
-
-
-
 
 void sigchld_handler(int s){
     (void)s;
@@ -59,20 +42,23 @@ int main(void){
     struct sigaction sa;
     int yes = 1;
     char s[INET6_ADDRSTRLEN];
-    int rv;
+    int rv; //For error checking the value getaddrinfo returns
 
 memset(&hints, 0, sizeof hints);
 hints.ai_family = AF_UNSPEC;
 hints.ai_socktype = SOCK_STREAM;
 hints.ai_flags = AI_PASSIVE; //Use my IP
 
-
+//getaddrinfo returns 0 on success and a non zero number on failure. 
 if((rv = getaddrinfo(NULL, PORT, &hints, &servinfo))!= 0){
+    //gai_strerror converts rv to a human readable string to show cause, print to the standard error stream
     fprintf(stderr, "getaddrinfo:%s\n", gai_strerror(rv));
     return 1;
 }
-
+//if no error, servinfo points to a linked list of struct addrinfo, with each containing a struct sockaddress
 //loop through all the results and bind to the first we can
+//This result is the linkedlist servinfo points to, servinfo is the head
+//so we loop through the linkedlist of struct addrinfo, with p the temporary pointer
 for(p = servinfo; p!=NULL; p = p->ai_next){
 
 if((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))== -1){
@@ -80,36 +66,43 @@ if((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))== -1){
     continue;
 }
 
+//if no error in socket() call, we set socket options
+//SO_REUSEADDR allows reuse of address immediately socket is closed. Even if it is in a TIME_WAIT state
 if(setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int))== -1){
     perror("setsockopt");
     exit(1);
 }
 
+//if no error in setting options, the socket is bound to a specific address 
 if(bind(sockfd, p->ai_addr, p->ai_addrlen)==-1){
     close(sockfd);
     perror("server:bind");
     continue;
 }
 
-break;
+break; // break out of loop on successful  or unsuccessful bind
 }
 freeaddrinfo(servinfo);
 
+//unsuccessful bind
 if(p==NULL){
     fprintf(stderr, "server: failed to bind\n");
     exit(1);
 }
 
+//successful bind, listen for incoming connections
 if(listen(sockfd, BACKLOG)== -1){
     perror("listen");
     exit(1);
 }
 
 
-sa.sa_handler = sigchld_handler;
-sigemptyset(&sa.sa_mask);
+//use a type of struct sigaction, manipulate the action taken by the process on interrupt by signals
+sa.sa_handler = sigchld_handler; //sa_handler is pointer to a signal handler function
+sigemptyset(&sa.sa_mask); //initialize an empty signal set, clear previous signals
 sa.sa_flags =SA_RESTART;
-if(sigaction(SIGCHLD, &sa, NULL)== -1){
+if(sigaction(SIGCHLD, &sa, NULL)== -1){  //there is a sigaction function that is a pointer 
+// to another signal handler function
 perror("sigaction");
 exit(1);
 
@@ -125,18 +118,25 @@ if(new_fd == -1){
     continue;
 }
 
+//convert binary representation of IP Address to string
 inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr),s, sizeof s);
 printf("server: got connection from %s\n", s);
+
+
+//create child process for each client connection
+//sever handles multiple clients without blocking the main process
+
 if(!fork()){
-    //this is the child process
-    close(sockfd); //child doesn't need the listener
+   //! before fork() only executes the code in the child process a
+    close(sockfd); //child process close original listening socket
     if(send(new_fd, "Hello, world!", 13, 0)== -1);
        perror("send");
-    close(new_fd);
-    exit(0);
+    close(new_fd);//on successful send
+    exit(0);//exit child process
 }
 
-close(new_fd); //parent doesnt need this
+close(new_fd); //parent process executes this code closing socket connected to client and continues
+//looping to accept more connections
 }
 return 0;
 }

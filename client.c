@@ -42,6 +42,7 @@ int main(int argc, char *argv[]){
     }
 
     //loop through all the resilts and connect to the first we can
+    //implicit socket and connect calls used here
 for(p=servinfo; p!=NULL; p= p->ai_next){
   if((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))== -1){
     perror("client: socket");
